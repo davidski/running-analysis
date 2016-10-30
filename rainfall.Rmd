@@ -1,0 +1,57 @@
+---
+title: "Weather Interactions"
+output: html_notebook
+---
+
+Playing around with how weather interacts with my runs.
+
+```{r setup}
+library(tidyverse)
+library(darksky)
+```
+
+Get all the forecast data from the start of the month to today.
+
+```{r get_data}
+dat <- get_forecast_for(latitude = 47.6704876, longitude = -122.3779114, 
+                        "2016-10-01T00:00:00")
+dat_all <- seq(as.Date("2016-10-01"), Sys.Date(), by="day") %>% 
+  map(~ get_forecast_for(latitude = 47.6704876, longitude = -122.3779114, 
+                         format(.x, "%Y-%m-%dT%H:%M:%S")))
+```
+
+How much rain on each day?
+```{r rainfall}
+#dat_all %>% map_dbl(c("daily", "precipIntensityMax")) %>% sum
+rainfall <- dat_all %>% map(c("hourly", "precipIntensity"))
+daily_rain <- rainfall %>% map_dbl(sum)
+monthly_rain <- rainfall %>% flatten_dbl %>% sum
+daily_rain <- data_frame(day = seq(as.Date("2016-10-01"), Sys.Date(), by="day"), 
+                         rainfall = daily_rain)
+```
+
+Now how far have I run each day?
+
+```{r run_length}
+run_lengths <- as_data_frame(summary(runsT)) %>% mutate(day = as.Date(sessionEnd)) %>% 
+  group_by(day) %>% summarize(distance = sum(distance))
+run_lengths
+```
+
+```{r join_datasets}
+dat <- left_join(daily_rain, run_lengths) %>% na.omit
+dat.scaled <- dat %>% mutate_at(vars(rainfall, distance), scale)
+ggplot(dat.scaled, aes(day, rainfall, color = "rain")) + geom_line() +
+  geom_line(aes(y = distance, color = "distance")) + 
+  labs(title = "Rainfall vs. Distance Ran", 
+       subtitle = "All values normallized",
+       caption = "Rainfall data via DarkSky\nDistance via trackeR",
+       x = NULL, y = "Normallized Score",
+       color = NULL) + 
+  theme_minimal() + 
+  theme(legend.position = "top") + 
+  scale_color_manual(values = c("red", "blue"))
+
+```
+
+

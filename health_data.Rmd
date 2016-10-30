@@ -1,0 +1,45 @@
+---
+title: "R Notebook"
+author: "David F. Severski (@dseverski)"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r setup}
+library(tidyverse)  # data-processing idioms
+library(xml2)       # processing XML files
+library(stringr)    # make strings better
+library(lubridate)  # make dates better
+library(magrittr)   # for %<>%
+```
+
+Read in HealthKit data
+
+```{r healthkit_import}
+health <- read_xml("./data/healthkit/export.xml")
+```
+
+BMI entries are `Record` `type="HKQuantityTypeIdentifierBodyMassIndex"` with 
+the numeric value in the `value` attribute and the date in the `creationDate` 
+attribute.
+
+```{r get_bmi}
+bmi_dat <- xml2::xml_find_all(health, "//Record[@type='HKQuantityTypeIdentifierBodyMassIndex']") %>%
+  xml_attrs %>% 
+  map(~as.list(.)) %>% bind_rows
+bmi_dat %<>% 
+  map_at(str_subset(names(bmi_dat), "Date"), ymd_hms) %>% bind_cols
+bmi_dat %<>% mutate(value = as.numeric(value))
+bmi_dat
+```
+
+Plot over time
+
+```{r plot_bmi}
+ggplot(bmi_dat, aes(x = startDate, y = value)) + 
+  geom_line() + geom_smooth() + 
+  theme_minimal()
+```

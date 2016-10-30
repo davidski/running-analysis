@@ -1,0 +1,59 @@
+---
+title: "Training Intensity"
+output: html_notebook
+---
+
+http://www.hrv4training.com/blog/how-hard-do-you-train
+
+```{r setup}
+library(tidyverse)
+```
+
+```{r summarize_runs}
+run_overview <- summary(runs_trackr)
+run_overview$run_type <- cut(run_overview$distance, breaks = c(0, 5, 8, 10, 15))
+as_data_frame(run_overview)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+```{r}
+ggplot(run_overview, aes(x = run_type, y = avgPaceMoving)) + geom_boxplot()
+```
+
+```{r}
+ggplot(run_overview, aes(x = run_type, y = avgHeartRateMoving)) + geom_boxplot()
+```
+
+Foo
+```{r}
+run_overview$max_hr <- runs_trackr %>% 
+  map(~ .x$"heart.rate") %>% 
+  map_dbl(., ~ max(coredata(.x), na.rm = TRUE))
+hr_3sd <- 3 * sd(run_overview$max_hr)
+hr_3sd <- c("low" = mean(run_overview$max_hr) - hr_3sd, 
+            "high" = mean(run_overview$max_hr) + hr_3sd)
+run_overview %<>% mutate(outlier = ifelse((max_hr < hr_3sd[["low"]]) | 
+                                            (max_hr > hr_3sd[["high"]]), TRUE, FALSE))
+ggplot(run_overview, aes(x = sessionStart, y = max_hr, color = outlier)) + geom_point() + theme_minimal()
+```
+
+So our max hr is 208!
+
+```{r}
+run_overview %>% filter(outlier == FALSE) %>% summarize(max_hr = max(max_hr))
+```
+
+
+  
+Get training intensity
+
+```{r}
+run_overview %<>% mutate(intensity = avgHeartRateMoving / 208)
+gg <- ggplot(run_overview, aes( x = intensity)) + geom_density(fill = "steelblue") + theme_minimal() +
+  labs(title = "Traning Intensity", 
+       caption = "Based on analysis techniques from HRV4training.com",
+       x = "Normalized heart rate",
+       y = "Density")
+gg
+```

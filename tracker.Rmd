@@ -1,0 +1,262 @@
+---
+title: "TrackeR"
+author: "David F. Severski (@dseverski)"
+date: "August 27, 2016"
+output: 
+  html_notebook: 
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(trackeR)
+library(xml2)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(ggthemes)
+library(scales)
+library(purrr)
+library(rvest)
+```
+
+# Data Import
+
+```{r sample_tcx_read, eval = FALSE}
+today <- readTCX(file = "./data/garmin/activity_1323723072.tcx")
+yesterday <- readTCX(file = "./data/garmin/activity_1245499673.tcx")
+```
+
+Garmin Connect TCX exports are easy to read and include:
+
+* lat/long
+* alt
+* distance
+* heart.rate
+
+```{r xml_parse, eval = FALSE}
+runk <- xml2::read_xml(file("./data/runkeeper/2016-08-27-0910.gpx"))
+ns <- xml_ns(runk)
+xml_find_all(runk, ".//d1:trkpt", ns = ns)
+foo <- xml_find_first(runk, ".//d1:trkpt", ns = ns) %>% xml_attrs()
+```
+
+There's also the `cycleRtools` package on CRAN.
+
+While I'd like to be able to download all my Garmin activities at once, the 
+Connect platform actively discourages users from this, with the only easy 
+solution being a web app that wants your credentials to impersonate you. 😞:(
+
+For now, manually copying all the files saved via the Garmin ANT agent to 
+`data/garmin`.
+
+```{r fetch_garmin, eval=FALSE}
+url <- "https://connect.garmin.com/en-US/signin"
+pgsession <- html_session(url)
+```
+
+Load in all of the TCX files.
+ Convert the time to duration for consistent cross-run plots.
+ 
+```{r read_all_runs}
+read_data <- function(x) {
+  message(paste0("Reading file: ", x))
+  dat <- readTCX(file = x)
+  dat$duration <- as.integer(dat$time - dat[1, "time"])
+  dat$name <- basename(x)
+  return(dat)
+}
+runs <- dir("./data/garmin", "*.TCX", full.names = TRUE) %>% 
+  purrr::map_df(read_data)
+runs <- as_data_frame(runs)
+```
+
+To get a trackeRdata object, we need to drop our computed columns. Once 
+made into a `trackeRdata` type, the `summary` and `plot` methods have useful 
+defaults.
+
+Note: All variables are all converted from metric to imperial units becuase 
+I'm a dumb American and thinking in terms of m/sec is hard.
+
+```{r make_trackeR_obj}
+runs_trackr <- select(runs, -duration, -name) %>% 
+  trackeRdata(data.frame(variable = c("latitude", "longitude",  "altitude", 
+                                      "distance", "heart.rate", "speed", 
+                                      "cadence", "power"), 
+                         unit = c("degree", "degree", "m", 
+                                  "m", "bpm",  "m_per_s", 
+                                  "steps_per_min", "W"))) %>% 
+  changeUnits(., variable = c("altitude", "speed", "distance", "pace"), 
+              unit = c("ft", "mi_per_h", "mi", "min_per_mi"))
+runsT <- threshold(runs_trackr, "heart.rate", 0, 200)
+summary(runsT, session = length(runsT))
+```
+
+
+## Data Validation
+
+The trackeR package does not return the activity type encoded in the TCX 
+file, though there is logic for treating cycling and running sessions 
+differently in the other processing sections. Some manual checking of the 
+files in the data directory versus what is aggregated follows.
+
+```{r compare_agg_vs_files}
+mutate(runs, start = as.Date(time)) %>% select(start) %>% unique -> file_dates
+map_df(runs_trackr, ~ data_frame(start = range(index(.))[1], stop = range(index(.))[2]), .id = NULL) %>% mutate(start = as.Date(start)) %>% select(start) -> agg_dates
+agg_dates$start %in% file_dates$start
+```
+
+# Overview
+
+Summary of all sessions.
+
+```{r summary}
+#summary(runsT)
+summary(runsT) %>% plot(., group = c("total", "moving"))
+```
+
+A timeline of all sessions and their duration is available via the `timeline` 
+function.
+```{r timeline}
+timeline(runs_trackr)
+```
+
+
+# Training Zones
+
+Heart rate training zones from [active]( http://www.active.com/fitness/articles/how-to-calculate-your-training-heart-rate-zones)
+
+```{r hr_calc}
+get_zones <- function(age = 43, resting_hr = 47) {
+  hr_max <- 208 - .7 * age     # ref Tanaka (2001)
+  reserve_hr <- hr_max - resting_hr
+  fatburn <- c(low = .5 * reserve_hr, high = .75 * reserve_hr)
+  fatburn_zone = fatburn + resting_hr
+  aerobic <- c(low = .75 * reserve_hr, high = .85 * reserve_hr)
+  aerobic_zone = aerobic + resting_hr
+  anaerobic <- c(low = .85 * reserve_hr, high = .95 * reserve_hr)
+  anaerobic_zone = anaerobic + resting_hr
+  return(data.frame(hr_max = hr_max, resting = resting_hr, 
+                    fat_low = fatburn_zone[[1]], 
+                    fat_high = fatburn_zone[[2]],
+                    aerobic_low = aerobic_zone[[1]], 
+                    aerobic_high = aerobic_zone[[2]],
+                    anaerobic_low = anaerobic_zone[[1]], 
+                    anaerobic_high = anaerobic_zone[[2]]))
+}
+hr_zones <- get_zones(age = 43, resting_hr = 45)
+hr_zones
+```
+
+Let's look at our range of raw heart rates
+
+```{r}
+raw_hr <- map(runs_trackr, ~ .x$"heart.rate") %>% map(., coredata) %>% unlist
+summary(raw_hr)
+high_hr <- raw_hr[!is.na(raw_hr) & raw_hr > hr_zones$hr_max] %>% sort %>%  rle %>% 
+  unclass %>% as_data_frame %>% arrange(values)
+break_points <- c("low" = hr_zones$hr_max - (hr_zones$hr_max %% 5),
+                  "high" = max(high_hr$values) + (max(high_hr$values) %% 5))
+ggplot(high_hr, aes(x = values, y = lengths)) + 
+  geom_col() +
+  theme_minimal() + 
+  labs(title = "High Heart Rate Occurances", x = "Heart Rate", 
+       y = "Number of Occcurances", 
+       caption = paste("Maximum HR assumed to be", zones$max)) + 
+  scale_x_continuous(breaks = seq(from = break_points["low"], 
+                                  to = break_points["high"], by = 5))
+```
+
+```{r pace_vs_hr}
+
+```
+
+trackeR can compute the amount of time in various `heart.rate` and `speed` zones.
+The default plot is a bit ungraceful, but it is ggplot and the data is returned 
+in a clean list for additional processing if desired.
+
+```{r tracker_zones}
+dat <- zones(runs_trackr, breaks = list(pace = c(0, 7, 8, 9, 10, 20), 
+                                heart.rate = c(0, hr_zones$fat_low, 
+                                               hr_zones$aerobic_low, 
+                                               hr_zones$anaerobic_low,
+                                               hr_zones$anaerobic_high,
+                                               hr_zones$hr_max)))
+plot(dat)
+```
+
+We can do some overrides on the default plot output to show the same plot, 
+summarized across all sessions.
+
+```{r no_session_fill}
+new_aes <- aes(x = zoneF, y = percent)
+gg <- plot(dat)
+gg$layers[[1]]$mapping <- ggplot2:::rename_aes(new_aes)
+gg
+rm(new_aes, gg)
+```
+
+Of course, we can also do this ourselves with a bit of ggplot.
+
+```{r plot_hr, eval = FALSE}
+zone_colors <- viridis_pal()(3)
+dat <- runs
+gg <- ggplot(dat, aes(x = duration, y = heart.rate))
+gg <- gg + geom_ribbon(aes(xmin = min(dat$duration), xmax = max(dat$duration), 
+                           ymin = hr_zones$fat_low, ymax = hr_zones$fat_high), 
+                       alpha = 0.5, fill = zone_colors[1])
+gg <- gg + geom_ribbon(aes(xmin = min(runs$duration), xmax = max(runs$duration), 
+                           ymin = hr_zones$aerobic_low, ymax = hr_zones$aerobic_high), 
+                       alpha = 0.5, fill = zone_colors[2])
+gg <- gg + geom_line(aes(group = name), alpha = 0.7) + geom_smooth()
+gg <- gg + scale_x_continuous(labels = comma)
+gg <- gg + theme_minimal()
+gg <- gg + labs(title = "Heart Rate Over Time")
+gg <- gg + labs(caption = "Garmin Connect TCX data")
+gg <- gg + labs(subtitle = "How often are we in \"The Zone\"?")
+gg <- gg + labs(x = "Duration (seconds)")
+gg <- gg + labs(y = "Heart rate (bpm)")
+gg
+```
+
+
+# Single Run Plots
+
+Pace and heart rate charts for the most recent run.
+
+```{r most_recent_run}
+recent_run <- length(runsT)
+plot(runsT[recent_run])
+```
+
+Roadmap of the most recent run.
+
+```{r run_map}
+plotRoute(runsT, session = recent_run, maptype = "roadmap")
+```
+
+We can also create interactive maps.
+
+```{r run_interactive_map}
+leafletRoute(runsT, session = (recent_run - 4):recent_run)
+```
+
+# Distribution Profiles
+
+```{r}
+d_profile <- distributionProfile(runsT, 
+                                 session = (length(runsT) - 4):length(runsT), 
+                                 what = c("speed", "heart.rate"), 
+                                 grid = list(
+                                   speed = seq(0, 12.5, by = 0.5),
+                                   heart.rate = seq(0, 220)))
+
+plot(d_profile, multiple = TRUE, smooth = FALSE)
+```
+
+# Concentration Profiles
+
+```{r}
+c_profile <- concentrationProfile(d_profile, what = c("speed", "heart.rate")) 
+plot(c_profile, smooth = FALSE, multiple = TRUE)
+```
