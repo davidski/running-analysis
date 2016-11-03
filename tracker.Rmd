@@ -18,6 +18,7 @@ library(ggthemes)
 library(scales)
 library(purrr)
 library(rvest)
+library(lubridate)
 ```
 
 # Data Import
@@ -121,6 +122,15 @@ function.
 timeline(runs_trackr)
 ```
 
+## Weekly Averages
+
+```{r weekly_averages}
+run_lengths <- as_data_frame(summary(runsT)) %>%
+  group_by(week = week(as.Date(sessionEnd))) %>% 
+  summarize(distance = sum(distance), 
+            duration = as.numeric(sum(duration), units = "hours"))
+run_lengths
+```
 
 # Training Zones
 
@@ -162,7 +172,7 @@ ggplot(high_hr, aes(x = values, y = lengths)) +
   theme_minimal() + 
   labs(title = "High Heart Rate Occurances", x = "Heart Rate", 
        y = "Number of Occcurances", 
-       caption = paste("Maximum HR assumed to be", zones$max)) + 
+       caption = paste("Maximum HR assumed to be", hr_zones$hr_max)) + 
   scale_x_continuous(breaks = seq(from = break_points["low"], 
                                   to = break_points["high"], by = 5))
 ```
