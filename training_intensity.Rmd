@@ -3,7 +3,8 @@ title: "Training Intensity"
 output: html_notebook
 ---
 
-http://www.hrv4training.com/blog/how-hard-do-you-train
+Based on the [How Hard Do You train](http://www.hrv4training.com/blog/how-hard-do-you-train) 
+blog from HRB4Training.
 
 ```{r setup}
 library(tidyverse)
