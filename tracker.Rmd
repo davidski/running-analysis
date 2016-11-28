@@ -35,21 +35,39 @@ Garmin Connect TCX exports are easy to read and include:
 * distance
 * heart.rate
 
+RunKeeper exports are in GPX format, which are XML files. These are 
+`trkseg` elements, with child collections of `trkpt` elements. Track 
+points are recorded for each auto-waypoint (time based) by the RunKeeper iOS
+app and have attriutes of:
+
+* lat
+* long
+
+And child items of:
+
+* ele (elevation)
+* time (UTC)
+
 ```{r xml_parse, eval = FALSE}
 runk <- xml2::read_xml(file("./data/runkeeper/2016-08-27-0910.gpx"))
 ns <- xml_ns(runk)
-xml_find_all(runk, ".//d1:trkpt", ns = ns)
+times <- xml_find_all(runk, ".//d1:time", ns = ns) %>% xml_text %>% ymd_hms %>% 
+  as_data_frame %>% mutate(interval = value - lag(value))
 foo <- xml_find_first(runk, ".//d1:trkpt", ns = ns) %>% xml_attrs()
 ```
 
 There's also the `cycleRtools` package on CRAN.
 
 While I'd like to be able to download all my Garmin activities at once, the 
-Connect platform actively discourages users from this, with the only easy 
-solution being a web app that wants your credentials to impersonate you. 😞:(
+Connect platform actively discourages users from this (API access is $5k!), 
+with the only easy solution being a web app that wants your credentials in 
+order to impersonate you. 😞:(
 
 For now, manually copying all the files saved via the Garmin ANT agent to 
-`data/garmin`.
+`data/garmin`. This means that elevation information is the raw altitude 
+information from the watch. On the Garmin 410 that I use, that's fairly 
+inaccurate (both Garmin Connect and RunKeeper do cross checks of lat/longs with 
+third party topographic services in order to provide better data).
 
 ```{r fetch_garmin, eval=FALSE}
 url <- "https://connect.garmin.com/en-US/signin"
@@ -60,6 +78,12 @@ Load in all of the TCX files.
  Convert the time to duration for consistent cross-run plots.
  
 ```{r read_all_runs}
+if (file.exists("./data/runs.rds")) {
+   runs <- readRDS("./data/runs.rds")
+} else {
+  runs <- NULL
+}
+
 read_data <- function(x) {
   message(paste0("Reading file: ", x))
   dat <- readTCX(file = x)
@@ -67,9 +91,16 @@ read_data <- function(x) {
   dat$name <- basename(x)
   return(dat)
 }
-runs <- dir("./data/garmin", "*.TCX", full.names = TRUE) %>% 
-  purrr::map_df(read_data)
-runs <- as_data_frame(runs)
+files_to_load <- setdiff(dir("./data/garmin", "*.TCX", full.names = FALSE), 
+                         runs$name)
+if (length(files_to_load > 0)) {
+  files_to_load <- paste0("./data/garmin/", files_to_load)
+  runs <- bind_rows(runs, map_df(files_to_load, read_data))
+  saveRDS(runs, "./data/runs.rds")
+  message("New files added:\n", paste0("\t", files_to_load, collapse="\n"))
+} else {
+  message("No new files to load.")
+}
 ```
 
 To get a trackeRdata object, we need to drop our computed columns. Once 
@@ -103,7 +134,9 @@ files in the data directory versus what is aggregated follows.
 
 ```{r compare_agg_vs_files}
 mutate(runs, start = as.Date(time)) %>% select(start) %>% unique -> file_dates
-map_df(runs_trackr, ~ data_frame(start = range(index(.))[1], stop = range(index(.))[2]), .id = NULL) %>% mutate(start = as.Date(start)) %>% select(start) -> agg_dates
+map_df(runs_trackr, ~ data_frame(start = range(index(.))[1], 
+                                 stop = range(index(.))[2]), .id = NULL) %>% 
+  mutate(start = as.Date(start)) %>% select(start) -> agg_dates
 agg_dates$start %in% file_dates$start
 ```
 
