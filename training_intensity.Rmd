@@ -8,11 +8,12 @@ blog from HRB4Training.
 
 ```{r setup}
 library(tidyverse)
+library(magrittr)
 ```
 
 ```{r summarize_runs}
 run_overview <- summary(runs_trackr)
-run_overview$run_type <- cut(run_overview$distance, breaks = c(0, 5, 8, 10, 15))
+run_overview$run_type <- cut(run_overview$distance, breaks = c(0, 5, 8, 10, 18))
 as_data_frame(run_overview)
 ```
 
@@ -51,7 +52,8 @@ Get training intensity
 
 ```{r}
 run_overview %<>% mutate(intensity = avgHeartRateMoving / 208)
-gg <- ggplot(run_overview, aes( x = intensity)) + geom_density(fill = "steelblue") + theme_minimal() +
+gg <- ggplot(run_overview, aes( x = intensity)) + 
+  geom_density(fill = "steelblue") + theme_minimal() +
   labs(title = "Traning Intensity", 
        caption = "Based on analysis techniques from HRV4training.com",
        x = "Normalized heart rate",
