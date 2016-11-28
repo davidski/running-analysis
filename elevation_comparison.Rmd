@@ -1,14 +1,15 @@
 ---
-title: "R Notebook"
+title: "Elevation Comparison"
 output: html_notebook
 ---
 
-This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
-
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+Working notes for comparing reported elevation changes from Garmin and 
+RunKeeper vs. the corrected values from both services.
 
 ```{r}
-runs_trackr[2][[1]] %>% fortify.zoo %>% mutate(total_climb = altitude - lag(altitude)) %>% select(Index, altitude, total_climb)
+runs_trackr[2][[1]] %>% fortify.zoo %>% 
+  mutate(total_climb = altitude - lag(altitude)) %>% 
+  select(Index, altitude, total_climb)
 ```
 
 Create a chart for the June 2016 Rock n' Roll half-marathon 
@@ -18,12 +19,11 @@ comparison.
 ```{r}
 runs_trackr[2][[1]] %>% fortify %>% ggplot(., aes(x=Index, y=altitude)) + 
   geom_line() + geom_ribbon(ymin=-500, aes(ymax=altitude), 
-                            fill=rgb(80, 176, 18, maxColorValue = 255), alpha=0.85) + 
+                            fill=rgb(80, 176, 18, maxColorValue = 255), alpha = 0.85) + 
   theme_minimal() + 
-  scale_y_continuous(labels = scales::comma, limits=c(-500, 1000)) + 
+  scale_y_continuous(labels = scales::comma, limits = c(-500, 1000)) + 
   labs(x="Time", title="Elevation over time", 
        subtitle = "Uncorrected values from TCX", 
        caption = "Rock 'n Roll Half-Marathon (June 2016)")
 ```
 
-When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
