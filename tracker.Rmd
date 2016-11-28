@@ -49,10 +49,14 @@ And child items of:
 * time (UTC)
 
 ```{r xml_parse, eval = FALSE}
-runk <- xml2::read_xml(file("./data/runkeeper/2016-08-27-0910.gpx"))
+runk <- xml2::read_xml(file("./data/runkeeper/RK_gpx_2016-06-18_0733.gpx"))
 ns <- xml_ns(runk)
 times <- xml_find_all(runk, ".//d1:time", ns = ns) %>% xml_text %>% ymd_hms %>% 
   as_data_frame %>% mutate(interval = value - lag(value))
+elev <- xml_find_all(runk, ".//d1:ele", ns = ns) %>% xml_text %>% 
+  as_data_frame %>% mutate(value = as.numeric(value), 
+                           interval = pmax(0, value - lag(value), na.rm = TRUE))
+sum(elev$interval)
 foo <- xml_find_first(runk, ".//d1:trkpt", ns = ns) %>% xml_attrs()
 ```
 
